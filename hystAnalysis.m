@@ -1,5 +1,4 @@
 %analysis for eva's perovskite hysteresis
-%written by g@greyltc.com on 2014-04-17
 
 clear all
 %==============EDIT HERE===================
