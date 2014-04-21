@@ -1,6 +1,6 @@
 some MATLAB code to analyze hysteresis
 
-Files here:
+### Files here
 - __hystAnalysis.m__
  - MATLAB script that performans the analysis, the first secion in the file is user editable
 - __evasDevice.data__
