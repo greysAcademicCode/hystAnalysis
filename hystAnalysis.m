@@ -3,10 +3,10 @@
 clear all
 %==============EDIT HERE===================
 
-myArea = 0.1; %cm^2
+myArea = 0.12; %cm^2
 
 %skip analysis of the first X segments
-segmentsToSkip = 2;
+segmentsToSkip = 1;
 
 %shows the analysis plot for each voltage step (useful to check if the fits are good)
 showAnalysisPlots = true;
@@ -64,7 +64,7 @@ iStart = 1 + segmentsToSkip;
 %this is the equation of the line we'll fit the tail to
 line = @(m,b,x) m*x+b;
 %this is the equation of the line plus the exponential decay
-%p(1) is the line slipe
+%p(1) is the line slope
 %p(2) is the y offset
 %p(3) is tau
 %p(4) is the time delay variable
@@ -171,6 +171,9 @@ for i = iStart:voltageStepsTaken
     end
 end
 
+%voltage step
+dV = abs(thisVoltage(end) - thisVoltage(end -1));
+
 %put NaNs in the proper places if we did not do the analysis on the first
 %segments
 if segmentsToSkip > 0
@@ -231,6 +234,7 @@ end
 
 f = figure;
 plot(thisVoltage,tau)
+csvwrite([dir filesep 'tau.csv'],[thisVoltage' tau'])
 h = title(file);
 set(h,'interpreter','none')
 xlabel('Voltage [V]')
@@ -241,8 +245,9 @@ print(f,'-dpng',[dir filesep 'tau.png'])
 
 f = figure;
 plot(thisVoltage,qAnalytical)
+csvwrite([dir filesep 'q.csv'],[thisVoltage' qAnalytical'])
 xlabel('Voltage [V]')
-ylabel('Charge Stored [mC]')
+ylabel('Charge Stored [mC/cm^2]')
 set(gca,'xdir','reverse')
 h = title(file);
 set(h,'interpreter','none')
