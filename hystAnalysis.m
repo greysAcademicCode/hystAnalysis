@@ -5,8 +5,8 @@ clear all
 
 myArea = 0.1; %cm^2
 
-%false right now because I didn't precondition properly
-analyzeFirstSegment = false;
+%skip analysis of the first X segments
+segmentsToSkip = 2;
 
 %shows the analysis plot for each voltage step (useful to check if the fits are good)
 showAnalysisPlots = true;
@@ -14,12 +14,14 @@ showAnalysisPlots = true;
 %this will generate a 2d color map of the possible max powers for different
 %IV curve measurement scenarios (takes a long time to compute so false by
 %default)
-generatePowerMap = false; 
+generatePowerMap = false;
 
 %========STOP EDITING NOW PROBABLY=========
 
 %read in data and get it ready
 [file, path] = uigetfile('*.*');
+dir = [path [file '_plots']];
+mkdir(dir)
 raw = importdata([path file]);
 V = raw(:,1); % in volts
 I = raw(:,2) *1000/myArea; %let's do current in mA/cm^2
@@ -33,12 +35,15 @@ if ((V(1)>V(end)) && (I(1)>I(end))) || ((V(1) < V(end)) && (I(1)<I(end)))
 end
 
 %plot up the raw data
-figure
+f = figure;
 [AX,H1,H2] = plotyy(t,I,t,V);
 set(get(AX(1),'Ylabel'),'String','Current Density [mA/cm^2]')
 set(get(AX(2),'Ylabel'),'String','Voltage  [V]')
+h = title(file);
+set(h,'interpreter','none')
 grid on
 xlabel('Time [s]')
+print(f,'-dpng',[dir filesep 'data.png'])
 
 %sgment the data at the voltage steps
 dV = diff(V);
@@ -54,10 +59,7 @@ iStep = find(boolStep);
 voltageStepsTaken = length(iStep)-1;
 averageDwellTime = mean(diff(t(iStep))); %in seconds
 
-iStart = 1;
-if ~analyzeFirstSegment
-    iStart = 2;
-end
+iStart = 1 + segmentsToSkip;
 
 %this is the equation of the line we'll fit the tail to
 line = @(m,b,x) m*x+b;
@@ -170,25 +172,28 @@ for i = iStart:voltageStepsTaken
 end
 
 %put NaNs in the proper places if we did not do the analysis on the first
-%segment
-if ~analyzeFirstSegment
-    i = 1;
-    tau(i) = nan;
-    m(i) = nan;
-    qAnalytical(i) = nan;
-    thisVoltage(i) = V(1);
-    apparentCurrent(:,:,i) = nan;
+%segments
+if segmentsToSkip > 0
+    for i =1:segmentsToSkip
+        tau(i) = nan;
+        m(i) = nan;
+        qAnalytical(i) = nan;
+        thisVoltage(i) = nan;
+        apparentCurrent(:,:,i) = nan;
+    end
 end
 
 apparentCurrent = reshape(apparentCurrent,[],voltageStepsTaken);
 
 %plot all the possible IV curves on top of eachother
-figure
+f = figure;
 plot(thisVoltage,apparentCurrent)
-title('I-V overlay')
+h = title(file);
+set(h,'interpreter','none')
 xlabel('Voltage [V]')
 ylabel('Current [mA/cm^2]')
 grid on
+print(f,'-dpng',[dir filesep 'all_iv_curves.png'])
 
 %generate the power map here
 if generatePowerMap
@@ -224,24 +229,32 @@ if generatePowerMap
     
 end
 
-figure
+f = figure;
 plot(thisVoltage,tau)
-title('Exponential time constant')
+h = title(file);
+set(h,'interpreter','none')
 xlabel('Voltage [V]')
 ylabel('\tau [s]')
 set(gca,'xdir','reverse')
 grid on
+print(f,'-dpng',[dir filesep 'tau.png'])
 
-figure
+f = figure;
 plot(thisVoltage,qAnalytical)
 xlabel('Voltage [V]')
 ylabel('Charge Stored [mC]')
 set(gca,'xdir','reverse')
+h = title(file);
+set(h,'interpreter','none')
 grid on
+print(f,'-dpng',[dir filesep 'q.png'])
 
-figure
+f = figure;
 plot(thisVoltage,m)
 xlabel('Voltage [V]')
-ylabel('Line Slope [mA/cm^2/s]')
+ylabel('Linear Decay [mA/cm^2/s]')
+h = title(file);
+set(h,'interpreter','none')
 set(gca,'xdir','reverse')
 grid on
+print(f,'-dpng',[dir filesep 'decayRate.png'])
