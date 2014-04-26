@@ -2,26 +2,29 @@
 
 clear all
 %==============EDIT HERE===================
-
 myArea = 0.12; %cm^2
+
+%set this to true if you don't want any of the output figures to be
+%displayed while the script is running (they'll still be saved as .png)
+dontDrawFigures = true;
 
 %skip analysis of the first X segments
 segmentsToSkip = 1;
 
 %shows the analysis plot for each voltage step (useful to check if the fits are good)
-showAnalysisPlots = true;
+showAnalysisPlots = false;
 
-%this will generate a 2d color map of the possible max powers for different
-%IV curve measurement scenarios (takes a long time to compute so false by
-%default)
-generatePowerMap = false;
+%set to true if you would like interpolation to be used between datapoints
+%to find the maximum power of the device for each simulated IV sweep
+%condition (slow)
+generateInterpolatedPowerMap = false;
 
 %========STOP EDITING NOW PROBABLY=========
 
 %read in data and get it ready
 [file, path] = uigetfile('*.*');
-dir = [path [file '_plots']];
-mkdir(dir)
+dir = [path [file '.outputs']];
+[~,~,~] = mkdir(dir);
 raw = importdata([path file]);
 V = raw(:,1); % in volts
 I = raw(:,2) *1000/myArea; %let's do current in mA/cm^2
@@ -33,17 +36,6 @@ status = raw(:,4);%TODO: prune data with bad status bits
 if ((V(1)>V(end)) && (I(1)>I(end))) || ((V(1) < V(end)) && (I(1)<I(end)))
     I = I*-1;
 end
-
-%plot up the raw data
-f = figure;
-[AX,H1,H2] = plotyy(t,I,t,V);
-set(get(AX(1),'Ylabel'),'String','Current Density [mA/cm^2]')
-set(get(AX(2),'Ylabel'),'String','Voltage  [V]')
-h = title(file);
-set(h,'interpreter','none')
-grid on
-xlabel('Time [s]')
-print(f,'-dpng',[dir filesep 'data.png'])
 
 %sgment the data at the voltage steps
 dV = diff(V);
@@ -58,6 +50,27 @@ iStep = find(boolStep);
 
 voltageStepsTaken = length(iStep)-1;
 averageDwellTime = mean(diff(t(iStep))); %in seconds
+
+%plot up the raw data
+if dontDrawFigures
+    f = figure('Visible','off');
+else
+    f = figure;
+end
+
+hold on
+[AX,H1,H2] = plotyy(t,I,t,V);
+[hAx,hLine1,hLine2] = plotyy(t(iStep),I(iStep),t(iStep),V(iStep));
+set(hLine1,'Marker','o','LineStyle','none')
+set(hLine2,'Marker','o','LineStyle','none')
+hold off
+set(get(AX(1),'Ylabel'),'String','Current Density [mA/cm^2]')
+set(get(AX(2),'Ylabel'),'String','Voltage  [V]')
+h = title(file);
+set(h,'interpreter','none')
+grid on
+xlabel('Time [s]')
+print(f,'-dpng',[dir filesep 'data.png'])
 
 iStart = 1 + segmentsToSkip;
 
@@ -96,16 +109,23 @@ apparentCurrent = zeros(powerMapResolution,powerMapResolution,voltageStepsTaken)
 %we'll assume that the simulated IV measurement system samples this fast
 assummedSamplingFrequency = 1000;
 
+%get lets get the voltages even for skipped steps
+for i = 1:voltageStepsTaken
+    si = iStep(i)+1;%segment start index
+    ei = iStep(i+1);%segment end index
+    thisV = V(si:ei);
+    thisVoltage(i) = mean(thisV);
+end
+
 %analyze each segment of the curve
 for i = iStart:voltageStepsTaken
+    fprintf('Fitting segment %i of %i\n',i,voltageStepsTaken)
     si = iStep(i)+1;%segment start index
     ei = iStep(i+1);%segment end index
     thist = t(si:ei);
     thisStartT = thist(1);
     thisEndT = thist(end);
     thisI = I(si:ei);
-    thisV = V(si:ei);
-    thisVoltage(i) = mean(thisV);
     
     newGuess = initialGuess;
     %need to do a bit better on the delay variable guess for the fit to
@@ -172,7 +192,7 @@ for i = iStart:voltageStepsTaken
 end
 
 %voltage step
-dV = abs(thisVoltage(end) - thisVoltage(end -1));
+voltageStepSize = abs(thisVoltage(1) - thisVoltage(end))/voltageStepsTaken;
 
 %put NaNs in the proper places if we did not do the analysis on the first
 %segments
@@ -181,15 +201,23 @@ if segmentsToSkip > 0
         tau(i) = nan;
         m(i) = nan;
         qAnalytical(i) = nan;
-        thisVoltage(i) = nan;
+        %thisVoltage(i) = nan;
         apparentCurrent(:,:,i) = nan;
     end
 end
 
 apparentCurrent = reshape(apparentCurrent,[],voltageStepsTaken);
+apparentPower = bsxfun(@times,apparentCurrent,thisVoltage);
+pce = nanmax(apparentPower,[],2);
+[bestPow,bestPowI] = max(pce);
+[worstPow,worstPowI] = min(pce);
 
 %plot all the possible IV curves on top of eachother
-f = figure;
+if dontDrawFigures
+    f = figure('Visible','off');
+else
+    f = figure;
+end
 plot(thisVoltage,apparentCurrent)
 h = title(file);
 set(h,'interpreter','none')
@@ -199,12 +227,15 @@ grid on
 print(f,'-dpng',[dir filesep 'all_iv_curves.png'])
 
 %generate the power map here
-if generatePowerMap
+if generateInterpolatedPowerMap
+    fprintf('Generating interpolated power map\r',i,voltageStepsTaken)
     ft = fittype( 'smoothingspline' );
     
     pce = zeros(1,powerMapResolution^2);
     warning off
-    for i = 1:powerMapResolution^2
+    pSize = powerMapResolution^2;
+    for i = 1:pSize
+        fprintf('Finding max power %i of %i\n',i,pSize)
         % Fit model to data.
         [p,in] = max(thisVoltage.*apparentCurrent(i,:));
         [xData, yData] = prepareCurveData( thisVoltage, apparentCurrent(i,:) );
@@ -215,26 +246,33 @@ if generatePowerMap
         pce(i) = vMax*fitresult(vMax);
     end
     warning on
-    
-    pceMin = min(pce);
-    pceMax = max(pce);
-    
-    pce = reshape(pce,powerMapResolution,powerMapResolution);
-    
-    figure
-    imagesc(delays,windows,pce)
-    axis square
-    xlabel('Delay [s]')
-    ylabel('Averaging window length [s]')
-    myTitle = sprintf('Maximum PCE = %0.2f%% Minimum PCE = %0.2f%%',pceMax,pceMin);
-    title(myTitle)
-    colorbar
-    
 end
 
-f = figure;
+pceMin = min(pce);
+pceMax = max(pce);
+
+pce = reshape(pce,powerMapResolution,powerMapResolution);
+
+if dontDrawFigures
+    f = figure('Visible','off');
+else
+    f = figure;
+end
+imagesc(delays,windows,pce)
+axis square
+xlabel('Delay [s]')
+ylabel('Averaging window length [s]')
+myTitle = sprintf('Maximum PCE = %0.2f%% Minimum PCE = %0.2f%%',pceMax,pceMin);
+title(myTitle)
+colorbar
+print(f,'-dpng',[dir filesep 'powerMap.png'])
+
+if dontDrawFigures
+    f = figure('Visible','off');
+else
+    f = figure;
+end
 plot(thisVoltage,tau)
-csvwrite([dir filesep 'tau.csv'],[thisVoltage' tau'])
 h = title(file);
 set(h,'interpreter','none')
 xlabel('Voltage [V]')
@@ -243,9 +281,12 @@ set(gca,'xdir','reverse')
 grid on
 print(f,'-dpng',[dir filesep 'tau.png'])
 
-f = figure;
+if dontDrawFigures
+    f = figure('Visible','off');
+else
+    f = figure;
+end
 plot(thisVoltage,qAnalytical)
-csvwrite([dir filesep 'q.csv'],[thisVoltage' qAnalytical'])
 xlabel('Voltage [V]')
 ylabel('Charge Stored [mC/cm^2]')
 set(gca,'xdir','reverse')
@@ -254,7 +295,11 @@ set(h,'interpreter','none')
 grid on
 print(f,'-dpng',[dir filesep 'q.png'])
 
-f = figure;
+if dontDrawFigures
+    f = figure('Visible','off');
+else
+    f = figure;
+end
 plot(thisVoltage,m)
 xlabel('Voltage [V]')
 ylabel('Linear Decay [mA/cm^2/s]')
@@ -263,3 +308,13 @@ set(h,'interpreter','none')
 set(gca,'xdir','reverse')
 grid on
 print(f,'-dpng',[dir filesep 'decayRate.png'])
+
+%write out data file
+outFileName = [dir filesep 'numericalOutputs.csv'];
+header = {'Voltage [V]', 'Best Current Density [mA/cm^2]', 'Worst Current Density [mA/cm^2]', 'Tau [s]', 'Q [mC/cm^2]','Linear Decay Rate [mA/cm^2/s]'};
+headerLine = sprintf('%s,',header{:});
+dlmwrite(outFileName,headerLine,'');
+outData = [thisVoltage' apparentCurrent(bestPowI,:)' apparentCurrent(worstPowI,:)' tau' qAnalytical' m'];
+dlmwrite(outFileName,outData,'-append','delimiter',',');
+
+fprintf('Done\n')
