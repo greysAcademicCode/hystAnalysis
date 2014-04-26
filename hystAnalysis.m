@@ -12,7 +12,7 @@ dontDrawFigures = true;
 segmentsToSkip = 1;
 
 %shows the analysis plot for each voltage step (useful to check if the fits are good)
-showAnalysisPlots = false;
+showAnalysisPlots = true;
 
 %set to true if you would like interpolation to be used between datapoints
 %to find the maximum power of the device for each simulated IV sweep
