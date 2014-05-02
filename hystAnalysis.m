@@ -2,7 +2,7 @@
 
 clear all
 %==============EDIT HERE===================
-myArea = 0.12; %cm^2
+myArea = 0.12; %cm^2 if you're using the new data file format, this will be overwritten using the value in the file
 
 %set this to true if you don't want any of the output figures to be
 %displayed while the script is running (they'll still be saved as .png)
@@ -20,16 +20,37 @@ showAnalysisPlots = true;
 generateInterpolatedPowerMap = false;
 
 %========STOP EDITING NOW PROBABLY=========
-
 %read in data and get it ready
 [file, path] = uigetfile('*.*');
+raw = importdata([path file]);
+if isfield(raw,'textdata')
+    nHeaderRows = size(raw.textdata,1);
+    for i = 1:nHeaderRows
+        thisLine = raw.textdata(i,1);
+        
+        %pick out area
+        if any(cell2mat(strfind(thisLine,'Area')))
+            splitString = strsplit(thisLine{1},' ');
+            myArea = str2double(splitString(4));
+        end
+        
+        
+    end
+end
+if isfield(raw,'data') %new format file
+    V = raw.data(:,1); % in volts
+    I = raw.data(:,2) * 1000/myArea; %let's do current in mA/cm^2
+    t = raw.data(:,3) - raw.data(1,3); %in seconds
+    status = raw.data(:,4);%TODO: prune data with bad status bits
+else %old format file
+    V = raw(:,1); % in volts
+    I = raw(:,2) * 1000/myArea; %let's do current in mA/cm^2
+    t = raw(:,3) - raw(1,3); %in seconds
+    status = raw(:,4);%TODO: prune data with bad status bits
+end
+
 dir = [path [file '.outputs']];
 [~,~,~] = mkdir(dir);
-raw = importdata([path file]);
-V = raw(:,1); % in volts
-I = raw(:,2) *1000/myArea; %let's do current in mA/cm^2
-t = raw(:,3) - raw(1,3); %in seconds
-status = raw(:,4);%TODO: prune data with bad status bits
 
 %change current sign if needed (because I hate when I-V curves are
 %upside-down)
