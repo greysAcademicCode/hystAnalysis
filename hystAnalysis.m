@@ -2,7 +2,8 @@
 
 clear all
 %==============EDIT HERE===================
-myArea = 0.12; %cm^2 if you're using the new data file format, this will be overwritten using the value in the file
+%if you're using the new data file format, this will be overwritten using the value in the file
+myArea = 0.12; %cm^2 
 
 %set this to true if you don't want any of the output figures to be
 %displayed while the script is running (they'll still be saved as .png)
@@ -19,6 +20,10 @@ showAnalysisPlots = true;
 %condition (slow)
 generateInterpolatedPowerMap = false;
 
+%choose data file sweep direction here
+%if you're using the new data file format, this will be overwritten using the value in the file
+sweepUp = false;
+
 %========STOP EDITING NOW PROBABLY=========
 %read in data and get it ready
 [file, path] = uigetfile('*.*');
@@ -26,12 +31,18 @@ raw = importdata([path file]);
 if isfield(raw,'textdata')
     nHeaderRows = size(raw.textdata,1);
     for i = 1:nHeaderRows
-        thisLine = raw.textdata(i,1);
+        thisLine = raw.textdata{i,1};
         
         %pick out area
-        if any(cell2mat(strfind(thisLine,'Area')))
-            splitString = strsplit(thisLine{1},' ');
-            myArea = str2double(splitString(4));
+        if any(strfind(thisLine,'Area'))
+            splitString = strsplit(thisLine,' ');
+            myArea = str2double(splitString{4});
+        end
+        
+        %pick out sweep direction
+        if any(strfind(thisLine,'sweepUp'))
+            splitString = strsplit(thisLine,' ');
+            sweepUp = strcmp(splitString{4},'1');
         end
         
         
@@ -105,8 +116,13 @@ line = @(m,b,x) m*x+b;
 f = @(p,x) p(1)*(x-p(4))+p(2)+exp(-1/p(3)*(x+p(4)));
 
 %probably only need to get the signs right here for the fit to converge...
-initialGuess = [-1 0 1 1];
+if sweepUp
+    initialGuess = [-1 0 1 1];
+else %then sweep down
+    initialGuess = [-1 0 -1 1];
+end
 
+%set some fit options here
 options =optimset('TolFun',1e-19,'TolX',0,'Algorithm','levenberg-marquardt','Display','off');
 
 %filterWindow = 21;
@@ -128,7 +144,7 @@ windows = linspace(minWindowLength,maxWindowLength,powerMapResolution);
 apparentCurrent = zeros(powerMapResolution,powerMapResolution,voltageStepsTaken);
 
 %we'll assume that the simulated IV measurement system samples this fast
-assummedSamplingFrequency = 1000;
+assummedSamplingFrequency = 1000; %in Hz
 
 %get lets get the voltages even for skipped steps
 for i = 1:voltageStepsTaken
@@ -157,6 +173,8 @@ for i = iStart:voltageStepsTaken
     f1=lsqcurvefit(f,newGuess,thist,thisI,[],[],options);
     thisF = @(x)f(f1,x);
     
+    %now we can extract the fit parameters from the (hopefully) successful
+    %fit
     tau(i) = f1(3);
     b = f1(2) - f1(1)*f1(4);%y-intercept
     m(i) = f1(1);%slope
@@ -170,6 +188,8 @@ for i = iStart:voltageStepsTaken
     %thisISmooth = sgolayfilt(thisI,golayOrder,filterWindow);
     
     %ensuring that these match is a nice sanity check
+    %if the numerical intigration roughly matches the analytical
+    %intigration that's great, otherwise something is botched
     qAnalytical(i) = curveArea - lineArea; %in mili-columbs
     qNumerical = trapz(thist,thisI) - lineArea; %in mili-columbs
     
