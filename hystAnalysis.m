@@ -128,13 +128,13 @@ f = @(p,x) p(1)*(x-p(4))+p(2)+exp(-1/p(3)*(x+p(4)));
 
 %probably only need to get the signs right here for the fit to converge...
 if sweepUp
-    initialGuess = [-1 0 1 1];
-else %then sweep down
     initialGuess = [-1 0 -1 1];
+else %then sweep down
+    initialGuess = [-1 0 1 1];
 end
 
 %set some fit options here
-options =optimset('TolFun',1e-19,'TolX',0,'Algorithm','levenberg-marquardt','Display','off');
+options = optimset('TolFun',1e-19,'TolX',0,'Algorithm','levenberg-marquardt','Display','off');
 
 %filterWindow = 21;
 %golayOrder = 3;
