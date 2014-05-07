@@ -28,7 +28,11 @@ sweepUp = false;
 %read in data and get it ready
 [file, path] = uigetfile('*.*');
 raw = importdata([path file]);
-if isfield(raw,'textdata')
+
+%do we have a new enough version of matlab to support strfind?
+newMatlab = exist('strfind');
+
+if isfield(raw,'textdata') && newMatlab
     nHeaderRows = size(raw.textdata,1);
     for i = 1:nHeaderRows
         thisLine = raw.textdata{i,1};
@@ -48,17 +52,24 @@ if isfield(raw,'textdata')
         
     end
 end
+
 if isfield(raw,'data') %new format file
     V = raw.data(:,1); % in volts
     I = raw.data(:,2) * 1000/myArea; %let's do current in mA/cm^2
-    t = raw.data(:,3) - raw.data(1,3); %in seconds
+    t = raw.data(:,3);
     status = raw.data(:,4);%TODO: prune data with bad status bits
 else %old format file
     V = raw(:,1); % in volts
     I = raw(:,2) * 1000/myArea; %let's do current in mA/cm^2
-    t = raw(:,3) - raw(1,3); %in seconds
+    t = raw(:,3);
     status = raw(:,4);%TODO: prune data with bad status bits
 end
+
+%let's make sure the data is in chronological order
+[t,i] = sort(t);
+V = V(i);
+I = I(i);
+t = t - t(1); %time should start from zero
 
 dir = [path [file '.outputs']];
 [~,~,~] = mkdir(dir);
@@ -67,6 +78,27 @@ dir = [path [file '.outputs']];
 %upside-down)
 if ((V(1)>V(end)) && (I(1)>I(end))) || ((V(1) < V(end)) && (I(1)<I(end)))
     I = I*-1;
+end
+
+%plot up the raw data
+if dontDrawFigures
+    f = figure('Visible','off');
+else
+    f = figure;
+end
+
+[AX,H1,H2] = plotyy(t,I,t,V);
+set(get(AX(1),'Ylabel'),'String','Current Density [mA/cm^2]')
+set(get(AX(2),'Ylabel'),'String','Voltage  [V]')
+h = title(file);
+set(h,'interpreter','none')
+grid on
+xlabel('Time [s]')
+print(f,'-dpng',[dir filesep 'data.png'])
+
+if ~newMatlab %end here if we have an old version of matlab
+    fprintf('your version of matlab is not new enough to continue')
+    return
 end
 
 %sgment the data at the voltage steps
@@ -82,27 +114,6 @@ iStep = find(boolStep);
 
 voltageStepsTaken = length(iStep)-1;
 averageDwellTime = mean(diff(t(iStep))); %in seconds
-
-%plot up the raw data
-if dontDrawFigures
-    f = figure('Visible','off');
-else
-    f = figure;
-end
-
-hold on
-[AX,H1,H2] = plotyy(t,I,t,V);
-[hAx,hLine1,hLine2] = plotyy(t(iStep),I(iStep),t(iStep),V(iStep));
-set(hLine1,'Marker','o','LineStyle','none')
-set(hLine2,'Marker','o','LineStyle','none')
-hold off
-set(get(AX(1),'Ylabel'),'String','Current Density [mA/cm^2]')
-set(get(AX(2),'Ylabel'),'String','Voltage  [V]')
-h = title(file);
-set(h,'interpreter','none')
-grid on
-xlabel('Time [s]')
-print(f,'-dpng',[dir filesep 'data.png'])
 
 iStart = 1 + segmentsToSkip;
 
