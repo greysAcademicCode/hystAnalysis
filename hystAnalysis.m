@@ -7,7 +7,7 @@ myArea = 0.12; %cm^2
 
 %set this to true if you don't want any of the output figures to be
 %displayed while the script is running (they'll still be saved as .png)
-dontDrawFigures = true;
+dontDrawFigures = false;
 
 %skip analysis of the first X segments
 segmentsToSkip = 1;
@@ -108,9 +108,14 @@ nSigmas = 6;
 %assume steps more than 6 sigma away from the mean are keithley voltage
 %changes
 boolStep = (dV < pd.mu-nSigmas*pd.sigma) | (dV > pd.mu+nSigmas*pd.sigma);
+stepValues = dV(boolStep);
+averageStepSize = mean(stepValues);
+problemSteps = find(averageStepSize*stepValues < 0);
+problemSteps = [problemSteps problemSteps-1]+1;
 boolStep(1) = true;%put marker at start
 boolStep(end) = true;%put marker at end
 iStep = find(boolStep);
+iStep(problemSteps) =[];
 
 voltageStepsTaken = length(iStep)-1;
 averageDwellTime = mean(diff(t(iStep))); %in seconds
@@ -157,7 +162,7 @@ apparentCurrent = zeros(powerMapResolution,powerMapResolution,voltageStepsTaken)
 %we'll assume that the simulated IV measurement system samples this fast
 assummedSamplingFrequency = 1000; %in Hz
 
-%get lets get the voltages even for skipped steps
+%lets get the voltages even for skipped steps
 for i = 1:voltageStepsTaken
     si = iStep(i)+1;%segment start index
     ei = iStep(i+1);%segment end index
