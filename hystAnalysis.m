@@ -10,7 +10,7 @@ myArea = 0.12; %cm^2
 dontDrawFigures = false;
 
 %skip analysis of the first X segments
-segmentsToSkip = 1;
+segmentsToSkip = 0;
 
 %shows the analysis plot for each voltage step (useful to check if the fits are good)
 showAnalysisPlots = true;
@@ -123,23 +123,24 @@ averageDwellTime = mean(diff(t(iStep))); %in seconds
 iStart = 1 + segmentsToSkip;
 
 %this is the equation of the line we'll fit the tail to
-line = @(m,b,x) m*x+b;
+line = @(m,x0,b,x) m*(x-x0)+b;
 %this is the equation of the line plus the exponential decay
-%p(1) is the line slope
-%p(2) is the y offset
-%p(3) is tau
-%p(4) is the time delay variable
-f = @(p,x) p(1)*(x-p(4))+p(2)+exp(-1/p(3)*(x+p(4)));
+%p(1) = m is the line's slope
+%x0 is the time delay variable
+%p(2) = b is the line's y intercept
+%p(3) = c is the exponential scaling factor
+%p(4) = tau
 
-%probably only need to get the signs right here for the fit to converge...
-if sweepUp
-    initialGuess = [-1 0 -1 1];
-else %then sweep down
-    initialGuess = [-1 0 1 1];
-end
+f = @(m,x0,b,c,x) (m*(x-x0)+b)+(c./((x-x0)));
+%f = @(m,x0,b,c,x) (m*(x-x0)+b)+(c./((x-x0)));
+%f = @(m,x0,b,c,tau,x) (m*(x-x0)+b)+(c*exp(-1/tau*(x-x0)));
+
 
 %set some fit options here
-options = optimset('TolFun',1e-19,'TolX',0,'Algorithm','levenberg-marquardt','Display','off');
+%options = optimset('TolFun',1e-23,'TolX',1e-23,'Algorithm','levenberg-marquardt','Display','on');
+options = optimset('Display','on');
+options = optimset('TolFun',1e-19,'TolX',1e-19,'Display','on','MaxFunEvals',3000,'MaxIter',3000);
+
 
 %filterWindow = 21;
 %golayOrder = 3;
@@ -167,6 +168,7 @@ for i = 1:voltageStepsTaken
     si = iStep(i)+1;%segment start index
     ei = iStep(i+1);%segment end index
     thisV = V(si:ei);
+    thisI = I(si:ei);
     thisVoltage(i) = mean(thisV);
 end
 
@@ -177,28 +179,40 @@ for i = iStart:voltageStepsTaken
     ei = iStep(i+1);%segment end index
     thist = t(si:ei);
     thisStartT = thist(1);
+    x0 = thisStartT;
     thisEndT = thist(end);
     thisI = I(si:ei);
+    assumedLinearI = thisI(round(4*end/5):end);
+    assumedLineart = thist(round(4*end/5):end);
     
-    newGuess = initialGuess;
-    %need to do a bit better on the delay variable guess for the fit to
-    %converge
-    newGuess(4) = initialGuess(4) - thisStartT;
+    x0
+    
+    %fit a line to the assumed linear region:
+    lineGuess= [0,0];
+    guessLineToFit = @(p,x) line(p(1),x0,p(2),x);
+    [f0, resnorm0]=lsqcurvefit(guessLineToFit,lineGuess,assumedLineart,assumedLinearI,[],[],options);
+    fittedGuessLine = @(x)line(f0(1),x0,f0(2),x);
     
     %fit the data for this segment
-    f1=lsqcurvefit(f,newGuess,thist,thisI,[],[],options);
-    thisF = @(x)f(f1,x);
+    fGuess = [f0(1) x0-0.0001 f0(2) 1]
+    fToFit = @(p,x) f(p(1),p(2),p(3),p(4),x);
+    [f1, resnorm1]=lsqcurvefit(fToFit,fGuess,thist,thisI,[],[],options);
+    fittedFunction = @(x)f(f1(1),x0,f1(2),f1(3),x);
+    fittedLine = @(x)line(f1(1),x0,f1(2),x);
+    
+    f1
     
     %now we can extract the fit parameters from the (hopefully) successful
     %fit
-    tau(i) = f1(3);
-    b = f1(2) - f1(1)*f1(4);%y-intercept
-    m(i) = f1(1);%slope
-    thisLine = @(x)line(m(i),b,x);
+    m(i) = f1(1);%line slope
+    b = f1(2);%line y-intercept
+    c(i) = f1(3);%exponential scaling factor
+    %tau(i) = f1(4);
+    tau(i) = nan;
     
     %intigrate under the analytical expressions as found by the fits
-    lineArea = integral(thisLine,thisStartT,thisEndT);
-    curveArea = integral(thisF,thisStartT,thisEndT);
+    lineArea = integral(fittedLine,thisStartT,thisEndT);
+    curveArea = integral(fittedFunction,thisStartT,thisEndT);
     
     %probably no real reason to smooth out the noise in the data...
     %thisISmooth = sgolayfilt(thisI,golayOrder,filterWindow);
@@ -213,24 +227,29 @@ for i = iStart:voltageStepsTaken
         figure
         hold on
         %plot(thist,thisI,'.',thist,f(f1,thist),'r',thist,thisISmooth,'g')
-        plot(thist,thisI,'.',thist,thisF(thist),'r',thist,thisLine(thist),'g')
+        plot(thist,thisI,'.',thist,fittedFunction(thist),'r',thist,fittedLine(thist),'g',thist,fittedGuessLine(thist))
+        %,thist,line([f0(1),x0,f0(2)],thist)
         myxLim = xlim;
         myyLim = ylim;
-        if thisI(end) < 0
-            h2 = area(thist,thisLine(thist));
+        if c(i) < 0
+            h2 = area(thist,fittedLine(thist));
             set(h2,'FaceColor','red','LineStyle','none')
-            h1 = area(thist,thisF(thist));
+            h1 = area(thist,fittedFunction(thist));
             set(h1,'FaceColor','white','LineStyle','none')
         else
-            h2 = area(thist,thisF(thist));
+            h2 = area(thist,fittedLine(thist));
             set(h2,'FaceColor','red','LineStyle','none')
-            h1 = area(thist,thisLine(thist));
+            h1 = area(thist,fittedFunction(thist));
             set(h1,'FaceColor','white','LineStyle','none')
         end
         
+        %lineWords = sprintf('y=%0.3f*(x-%0.3f)%+0.3f',m(i),x0,b);
+        %fitWords =  sprintf('y=%0.3f*(x-%0.3f)%+0.3f%+0.3f*exp(-1/%0.3f*(x-%0.3f))',m(i),x0,b,scale(i),tau(i),x0);
+        %legend('Current Data',fitWords,lineWords,'Location','SouthOutside')
+        
         xlim(myxLim)
         ylim(myyLim)
-        plot(thist,thisI,'.',thist,thisF(thist),'r',thist,thisLine(thist),'g')
+        plot(thist,thisI,'.',thist,fittedFunction(thist),'r',thist,fittedLine(thist),'g')
         words = sprintf('Voltage constant at %0.2f V',thisVoltage(i));
         title(words)
         xlabel('Time [s]')
@@ -243,7 +262,7 @@ for i = iStart:voltageStepsTaken
         for id = 1:powerMapResolution
             sampleStartTime = thisStartT + delays(id);
             sampleEndTime = thisStartT + delays(id) + windows(iw);
-            apparentCurrent(iw,id,i) = mean(thisF(sampleStartTime:1/assummedSamplingFrequency:sampleEndTime));
+            apparentCurrent(iw,id,i) = mean(fittedFunction(sampleStartTime:1/assummedSamplingFrequency:sampleEndTime));
         end
     end
 end
