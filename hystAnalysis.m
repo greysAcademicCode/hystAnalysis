@@ -123,7 +123,7 @@ averageDwellTime = mean(diff(t(iStep))); %in seconds
 iStart = 1 + segmentsToSkip;
 
 %this is the equation of the line we'll fit the tail to
-line = @(m,x0,b,x) m*(x-x0)+b;
+line = @(m,b,x0,x) m*(x-x0)+b;
 %this is the equation of the line plus the exponential decay
 %p(1) = m is the line's slope
 %x0 is the time delay variable
@@ -131,16 +131,20 @@ line = @(m,x0,b,x) m*(x-x0)+b;
 %p(3) = c is the exponential scaling factor
 %p(4) = tau
 
-f = @(m,x0,b,c,x) (m*(x-x0)+b)+(c./((x-x0)));
-%f = @(m,x0,b,c,x) (m*(x-x0)+b)+(c./((x-x0)));
+f = @(m,b,c,d,x0,x) (m*(x-x0)+b)+(c./((x-x0+d)));
+%f = @(m,x0,b,c,x) (m*(x-x0)+b)+(c./((x-x0+d)));
 %f = @(m,x0,b,c,tau,x) (m*(x-x0)+b)+(c*exp(-1/tau*(x-x0)));
 
 
 %set some fit options here
 %options = optimset('TolFun',1e-23,'TolX',1e-23,'Algorithm','levenberg-marquardt','Display','on');
-options = optimset('Display','on');
-options = optimset('TolFun',1e-19,'TolX',1e-19,'Display','on','MaxFunEvals',3000,'MaxIter',3000);
+%options = optimset('Display','on');
+%options = optimset('TolFun',1e-19,'TolX',1e-19,'Display','on','MaxFunEvals',3000,'MaxIter',3000,'Algorithm','levenberg-marquardt');
+ft = fitoptions('Method','NonlinearLeastSquares','TolFun',1e-19,'TolX',1e-19,'Display','notify','MaxFunEvals',3000,'MaxIter',3000,'Algorithm','levenberg-marquardt');
+fFitter = fittype(f,'Problem','x0');
+lineFitter = fittype(line,'Problem','x0');
 
+'Startpoint',fGuess
 
 %filterWindow = 21;
 %golayOrder = 3;
@@ -189,30 +193,36 @@ for i = iStart:voltageStepsTaken
     
     %fit a line to the assumed linear region:
     lineGuess= [0,0];
-    guessLineToFit = @(p,x) line(p(1),x0,p(2),x);
-    [f0, resnorm0]=lsqcurvefit(guessLineToFit,lineGuess,assumedLineart,assumedLinearI,[],[],options);
-    fittedGuessLine = @(x)line(f0(1),x0,f0(2),x);
+    
+    %guessLineToFit = @(p,x) line(p(1),x0,p(2),x);
+    %[f0, resnorm0]=lsqcurvefit(guessLineToFit,lineGuess,assumedLineart,assumedLinearI,[],[],options);
+    %fittedGuessLine = @(x)line(f0(1),x0,f0(2),x);
+    ft.StartPoint = lineGuess;
+    [fittedLine,gof,output] = fit(assumedLineart,assumedLinearI,lineFitter,'problem',x0,ft);
     
     %fit the data for this segment
-    fGuess = [f0(1) x0-0.0001 f0(2) 1]
-    fToFit = @(p,x) f(p(1),p(2),p(3),p(4),x);
-    [f1, resnorm1]=lsqcurvefit(fToFit,fGuess,thist,thisI,[],[],options);
-    fittedFunction = @(x)f(f1(1),x0,f1(2),f1(3),x);
-    fittedLine = @(x)line(f1(1),x0,f1(2),x);
+    fGuess = [fittedLine.m fittedLine.b 0 1e-3]
+    ft.StartPoint = fGuess;
+    [fittedFunction,gof,output] = fit(thist,thisI,fFitter,'problem',x0,ft);
+    %fToFit = @(p,x) f(p(1),x0,p(2),p(3),p(4),x);
+    %[f1, resnorm1]=lsqcurvefit(fToFit,fGuess,thist,thisI,[],[],options);
+    %fittedFunction = @(x)f(f1(1),x0,f1(2),f1(3),f1(4),x);
+    %fittedLine = @(x)line(f1(1),x0,f1(2),x);
     
     f1
     
     %now we can extract the fit parameters from the (hopefully) successful
     %fit
-    m(i) = f1(1);%line slope
-    b = f1(2);%line y-intercept
-    c(i) = f1(3);%exponential scaling factor
+    m(i) = fittedFunction.m;%line slope
+    b = fittedFunction.b;%line y-intercept
+    c(i) = fittedFunction.c;%exponential scaling factor
     %tau(i) = f1(4);
     tau(i) = nan;
+    d(i) = fittedFunction.d;
     
     %intigrate under the analytical expressions as found by the fits
-    lineArea = integral(fittedLine,thisStartT,thisEndT);
-    curveArea = integral(fittedFunction,thisStartT,thisEndT);
+    lineArea = integral(@(x)fittedLine(x),thisStartT,thisEndT,'ArrayValued',true);
+    curveArea = integral(@(x)fittedLine(x),thisStartT,thisEndT,'ArrayValued',true);
     
     %probably no real reason to smooth out the noise in the data...
     %thisISmooth = sgolayfilt(thisI,golayOrder,filterWindow);
@@ -221,7 +231,12 @@ for i = iStart:voltageStepsTaken
     %if the numerical intigration roughly matches the analytical
     %intigration that's great, otherwise something is botched
     qAnalytical(i) = curveArea - lineArea; %in mili-columbs
-    qNumerical = trapz(thist,thisI) - lineArea; %in mili-columbs
+    
+    %this is the percent difference between integrating the area under the
+    %data numerically and analytically. it should be small.
+    %if it's not, the fit was bad.
+    sanityCheckPercentage = abs(trapz(thist,thisI) - curveArea)/trapz(thist,thisI);
+    
     
     if showAnalysisPlots
         figure
