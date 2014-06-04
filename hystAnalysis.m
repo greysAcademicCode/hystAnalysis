@@ -3,7 +3,7 @@
 clear all
 %==============EDIT HERE===================
 %if you're using the new data file format, this will be overwritten using the value in the file
-myArea = 0.12; %cm^2 
+myArea = 0.12; %cm^2
 
 %set this to true if you don't want any of the output figures to be
 %displayed while the script is running (they'll still be saved as .png)
@@ -19,10 +19,6 @@ showAnalysisPlots = true;
 %to find the maximum power of the device for each simulated IV sweep
 %condition (slow)
 generateInterpolatedPowerMap = false;
-
-%choose data file sweep direction here
-%if you're using the new data file format, this will be overwritten using the value in the file
-sweepUp = false;
 
 %========STOP EDITING NOW PROBABLY=========
 %read in data and get it ready
@@ -42,14 +38,6 @@ if isfield(raw,'textdata') && newMatlab
             splitString = strsplit(thisLine,' ');
             myArea = str2double(splitString{4});
         end
-        
-        %pick out sweep direction
-        if any(strfind(thisLine,'sweepUp'))
-            splitString = strsplit(thisLine,' ');
-            sweepUp = strcmp(splitString{4},'1');
-        end
-        
-        
     end
 end
 
@@ -124,30 +112,18 @@ iStart = 1 + segmentsToSkip;
 
 %this is the equation of the line we'll fit the tail to
 line = @(m,b,x0,x) m*(x-x0)+b;
-%this is the equation of the line plus the exponential decay
-%p(1) = m is the line's slope
-%x0 is the time delay variable
-%p(2) = b is the line's y intercept
-%p(3) = c is the exponential scaling factor
-%p(4) = tau
 
+%this is the equation of the line plus the transient curve
 f = @(m,b,c,d,x0,x) (m*(x-x0)+b)+(c./((x-x0+d)));
-%f = @(m,x0,b,c,x) (m*(x-x0)+b)+(c./((x-x0+d)));
-%f = @(m,x0,b,c,tau,x) (m*(x-x0)+b)+(c*exp(-1/tau*(x-x0)));
+%f = @(m,b,c,tau,x0,x) (m*(x-x0)+b)+(c*exp(-1/tau*(x-x0)));
 
+%initial guesses for fit variables
+intialGuess = [0 0 0 1e-3];
 
-%set some fit options here
-%options = optimset('TolFun',1e-23,'TolX',1e-23,'Algorithm','levenberg-marquardt','Display','on');
-%options = optimset('Display','on');
-%options = optimset('TolFun',1e-19,'TolX',1e-19,'Display','on','MaxFunEvals',3000,'MaxIter',3000,'Algorithm','levenberg-marquardt');
+%setup the fits
 ft = fitoptions('Method','NonlinearLeastSquares','TolFun',1e-19,'TolX',1e-19,'Display','notify','MaxFunEvals',3000,'MaxIter',3000,'Algorithm','levenberg-marquardt');
 fFitter = fittype(f,'Problem','x0');
 lineFitter = fittype(line,'Problem','x0');
-
-'Startpoint',fGuess
-
-%filterWindow = 21;
-%golayOrder = 3;
 
 powerMapResolution = 100; %total power data points will be this number^2
 
@@ -178,7 +154,6 @@ end
 
 %analyze each segment of the curve
 for i = iStart:voltageStepsTaken
-    fprintf('Fitting segment %i of %i\n',i,voltageStepsTaken)
     si = iStep(i)+1;%segment start index
     ei = iStep(i+1);%segment end index
     thist = t(si:ei);
@@ -189,64 +164,61 @@ for i = iStart:voltageStepsTaken
     assumedLinearI = thisI(round(4*end/5):end);
     assumedLineart = thist(round(4*end/5):end);
     
-    x0
+    %print the time (for debugging)
+    %x0
     
     %fit a line to the assumed linear region:
-    lineGuess= [0,0];
+    lineGuess= [intialGuess(1),intialGuess(2)];
     
-    %guessLineToFit = @(p,x) line(p(1),x0,p(2),x);
-    %[f0, resnorm0]=lsqcurvefit(guessLineToFit,lineGuess,assumedLineart,assumedLinearI,[],[],options);
-    %fittedGuessLine = @(x)line(f0(1),x0,f0(2),x);
     ft.StartPoint = lineGuess;
-    [fittedLine,gof,output] = fit(assumedLineart,assumedLinearI,lineFitter,'problem',x0,ft);
+    [earlyLine,gof,output] = fit(assumedLineart,assumedLinearI,lineFitter,'problem',x0,ft);
     
     %fit the data for this segment
-    fGuess = [fittedLine.m fittedLine.b 0 1e-3]
+    fGuess = [earlyLine.m earlyLine.b intialGuess(3) intialGuess(4)];
     ft.StartPoint = fGuess;
     [fittedFunction,gof,output] = fit(thist,thisI,fFitter,'problem',x0,ft);
-    %fToFit = @(p,x) f(p(1),x0,p(2),p(3),p(4),x);
-    %[f1, resnorm1]=lsqcurvefit(fToFit,fGuess,thist,thisI,[],[],options);
-    %fittedFunction = @(x)f(f1(1),x0,f1(2),f1(3),f1(4),x);
-    %fittedLine = @(x)line(f1(1),x0,f1(2),x);
     
-    f1
     
     %now we can extract the fit parameters from the (hopefully) successful
     %fit
-    m(i) = fittedFunction.m;%line slope
-    b = fittedFunction.b;%line y-intercept
-    c(i) = fittedFunction.c;%exponential scaling factor
-    %tau(i) = f1(4);
-    tau(i) = nan;
-    d(i) = fittedFunction.d;
+    fitParams(i,:) = coeffvalues(fittedFunction);
     
-    %intigrate under the analytical expressions as found by the fits
-    lineArea = integral(@(x)fittedLine(x),thisStartT,thisEndT,'ArrayValued',true);
-    curveArea = integral(@(x)fittedLine(x),thisStartT,thisEndT,'ArrayValued',true);
+    %this assumes the first two terms of the fit function are line slope and intercept
+    fittedLine = @(x) line(fitParams(i,1),fitParams(i,2),x0,x);
     
-    %probably no real reason to smooth out the noise in the data...
-    %thisISmooth = sgolayfilt(thisI,golayOrder,filterWindow);
+    %integrate under the analytical expressions as found by the fits
+    lineArea = integral(fittedLine,thisStartT,thisEndT);
+    curveArea = integral(@(x)fittedFunction(x),thisStartT,thisEndT,'ArrayValued',true);
     
-    %ensuring that these match is a nice sanity check
-    %if the numerical intigration roughly matches the analytical
-    %intigration that's great, otherwise something is botched
+    %area(charge) difference between line fit and curve fit
     qAnalytical(i) = curveArea - lineArea; %in mili-columbs
     
     %this is the percent difference between integrating the area under the
     %data numerically and analytically. it should be small.
     %if it's not, the fit was bad.
-    sanityCheckPercentage = abs(trapz(thist,thisI) - curveArea)/trapz(thist,thisI);
+    sanityCheckPercentage(i) = abs(trapz(thist,thisI) - curveArea)/trapz(thist,thisI);
     
+    R2(i) = gof.rsquare;
+    badFitThreshold = 0.95;
+    if R2(i) < badFitThreshold
+        reportString = 'bad fit.';
+        badFit = true;
+        fitParams(i,:) = nan(1,size(fitParams,2));
+        qAnalytical(i) = nan;
+    else %the fit was "good"
+        reportString = 'good fit.';
+        badFit = false;
+    end
+    fprintf('Segment %i of %i: %s\n',i,voltageStepsTaken,reportString)
     
     if showAnalysisPlots
         figure
         hold on
         %plot(thist,thisI,'.',thist,f(f1,thist),'r',thist,thisISmooth,'g')
-        plot(thist,thisI,'.',thist,fittedFunction(thist),'r',thist,fittedLine(thist),'g',thist,fittedGuessLine(thist))
-        %,thist,line([f0(1),x0,f0(2)],thist)
+        plot(thist,thisI,'.',thist,fittedFunction(thist),'r',thist,fittedLine(thist),'g')
         myxLim = xlim;
         myyLim = ylim;
-        if c(i) < 0
+        if qAnalytical(i) < 0
             h2 = area(thist,fittedLine(thist));
             set(h2,'FaceColor','red','LineStyle','none')
             h1 = area(thist,fittedFunction(thist));
@@ -258,9 +230,15 @@ for i = iStart:voltageStepsTaken
             set(h1,'FaceColor','white','LineStyle','none')
         end
         
-        %lineWords = sprintf('y=%0.3f*(x-%0.3f)%+0.3f',m(i),x0,b);
-        %fitWords =  sprintf('y=%0.3f*(x-%0.3f)%+0.3f%+0.3f*exp(-1/%0.3f*(x-%0.3f))',m(i),x0,b,scale(i),tau(i),x0);
-        %legend('Current Data',fitWords,lineWords,'Location','SouthOutside')
+        lineStr = func2str(line);
+        lineScanned = textscan(func2str(line),'@(%[^)]) %s');
+        funcStr = func2str(f);
+        funcScanned = textscan(func2str(f),'@(%[^)]) %s');
+        
+        lineWords = sprintf('y=%0.3f*(x-%0.3f)%+0.3f',m(i),x0,b);
+        
+        fitWords =  sprintf('y=%0.3f*(x-%0.3f)%+0.3f%+0.3f*exp(-1/%0.3f*(x-%0.3f))',m(i),x0,b,scale(i),tau(i),x0);
+        legend('Current Data',fitWords,lineWords,'Location','SouthOutside')
         
         xlim(myxLim)
         ylim(myyLim)
