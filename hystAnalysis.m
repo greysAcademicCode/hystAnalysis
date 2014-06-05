@@ -10,7 +10,7 @@ myArea = 0.12; %cm^2
 dontDrawFigures = false;
 
 %skip analysis of the first X segments
-segmentsToSkip = 0;
+segmentsToSkip = 12;
 
 %shows the analysis plot for each voltage step (useful to check if the fits are good)
 showAnalysisPlots = true;
@@ -25,13 +25,17 @@ generateInterpolatedPowerMap = false;
 %'x' must be used as the independant variable
 %note that the entry here will be added to the equation of a line and
 %approritely time shifted
-assumedDecayFunction = 'c/(x+d)';
+%assumedDecayFunction = 'c/(x+d)';
 %assumedDecayFunction = 'c*exp(-1/tau*x)';
+assumedDecayFunction = 'c*exp(-1/tau*x)+d*exp(-1/tau2*x)';
 
 %you must provide guesses for your variables for the fit algorithm
 %normally this doesn't matter too much
-%list the guesses in the order you introduced your variables in assumedDecayFunction
-variableGuesses = [0, 1e-3];
+%list the guesses in the order you introduced your variables in
+%assumedDecayFunction above
+%variableGuesses = [0, 1e-3];
+%variableGuesses = [0, 1];
+variableGuesses = [1e-3, 1e-3, 1e-3, 1e-3];
 
 %========STOP EDITING NOW PROBABLY=========
 %read in data and get it ready
@@ -137,12 +141,15 @@ for i = 1:length(symVars)
     end
 end
 variableString = [variableString 'x0,x) '];
+funcString = ['m*(x-x0)+b+' char(decaySym)];
 
-f = str2func([variableString 'm*(x-x0)+b+' char(decaySym)]);
-f = @(m,b,c,d,x0,x)m*(x-x0)+b+c./(d+x-x0);
-%this is the equation of the line plus the transient curve
-%f = @(m,b,c,d,x0,x) (m*(x-x0)+b)+(c./((x-x0+d)));
-%f = @(m,b,c,tau,x0,x) (m*(x-x0)+b)+(c*exp(-1/tau*(x-x0)));
+%elementwise e'r'thing:
+funcString = strrep(funcString,'*','.*');
+funcString = strrep(funcString,'/','./');
+funcString = strrep(funcString,'^','.^');
+
+
+f = str2func([variableString funcString]);
 
 %initial guesses for fit variables
 intialGuess = [0 0 variableGuesses];
@@ -158,6 +165,8 @@ funcStr=funcScanned{2}{1};
 
 %setup the fits
 ft = fitoptions('Method','NonlinearLeastSquares','TolFun',1e-19,'TolX',1e-19,'Display','notify','MaxFunEvals',3000,'MaxIter',3000,'Algorithm','levenberg-marquardt');
+%ft = fitoptions('Method','NonlinearLeastSquares','Algorithm','Trust-Region');
+
 fFitter = fittype(f,'Problem','x0');
 lineFitter = fittype(line,'Problem','x0');
 
@@ -210,7 +219,10 @@ for i = iStart:voltageStepsTaken
     [earlyLine,gof,output] = fit(assumedLineart,assumedLinearI,lineFitter,'problem',x0,ft);
     
     %fit the data for this segment
-    fGuess = [earlyLine.m earlyLine.b intialGuess(3) intialGuess(4)];
+    fGuess = intialGuess;
+    fGuess(1) = earlyLine.m;
+    fGuess(2) = earlyLine.b;
+    %fGuess = [earlyLine.m earlyLine.b intialGuess(3) intialGuess(4)];
     ft.StartPoint = fGuess;
     [fittedFunction,gof,output] = fit(thist,thisI,fFitter,'problem',x0,ft);
     
@@ -223,19 +235,26 @@ for i = iStart:voltageStepsTaken
     fittedLine = @(x) line(fitParams(i,1),fitParams(i,2),x0,x);
     
     %integrate under the analytical expressions as found by the fits
-    lineArea = integral(fittedLine,thisStartT,thisEndT);
-    curveArea = integral(@(x)fittedFunction(x),thisStartT,thisEndT,'ArrayValued',true);
+    %lineArea = integral(fittedLine,thisStartT,thisEndT);
+    %curveArea = integral(@(x)fittedFunction(x),thisStartT,thisEndT,'ArrayValued',true);
     
     %area(charge) difference between line fit and curve fit
-    qAnalytical(i) = curveArea - lineArea; %in mili-columbs
+    %qAnalytical(i) = curveArea - lineArea; %in mili-columbs
+    
+    symbolEqn = decaySym;
+    for j = 3:(length(funcVarNames)-2)
+        symbolEqn = subs(symbolEqn,funcVarNames{j},fitParams(i,j));
+    end
+    symbolEqn = subs(symbolEqn,'x0',0);
+    qAnalytical(i) = double(int(symbolEqn,0,inf));
     
     %this is the percent difference between integrating the area under the
     %data numerically and analytically. it should be small.
     %if it's not, the fit was bad.
-    sanityCheckPercentage(i) = abs(trapz(thist,thisI) - curveArea)/trapz(thist,thisI);
+    %sanityCheckPercentage(i) = abs(trapz(thist,thisI) - curveArea)/trapz(thist,thisI);
     
     R2(i) = gof.rsquare;
-    badFitThreshold = 0.99;
+    badFitThreshold = 0;
     if R2(i) < badFitThreshold
         reportString = 'bad fit';
         badFit = true;
@@ -245,7 +264,8 @@ for i = iStart:voltageStepsTaken
         reportString = 'good fit';
         badFit = false;
     end
-    fprintf('Segment %i of %i: R^2=%0.5f, %s\n',i,voltageStepsTaken,R2(i),reportString)
+    reportString = sprintf('Segment %i of %i: Voltage constant at %0.2f V, R^2=%0.5f, %s\n',i,voltageStepsTaken,thisVoltage(i),R2(i),reportString);
+    fprintf(reportString)
     
     if showAnalysisPlots
         figure
@@ -253,7 +273,7 @@ for i = iStart:voltageStepsTaken
         plot(thist,thisI,'.',thist,fittedFunction(thist),'r',thist,fittedLine(thist),'g')
         myxLim = xlim;
         myyLim = ylim;
-        if qAnalytical(i) < 0
+        if qAnalytical(i) > 0
             h2 = area(thist,fittedLine(thist));
             set(h2,'FaceColor','red','LineStyle','none')
             h1 = area(thist,fittedFunction(thist));
@@ -273,17 +293,18 @@ for i = iStart:voltageStepsTaken
         lineRep = strrep(lineRep,'x0',num2str(x0));
         lineRep = strrep(lineRep,'x','t');
         
-        funcRep = funcStr;
-        for j =1:length(fitParams(i,:))
+        funcRep = char(subs(decaySym,'x','t'));
+        for j =3:length(fitParams(i,:))
+            %funcRep = char(subs(funcRep,funcVarNames{j},num2str(fitParams(i,j))));
             funcRep = strrep(funcRep,funcVarNames{j},num2str(fitParams(i,j)));
         end
-        funcRep = strrep(funcRep,'x0',num2str(x0));
-        funcRep = strrep(funcRep,'x','t');
+        %funcRep = char(subs(funcRep,'x0',x0));
+        funcRep = [lineRep '+' strrep(funcRep,'x0',num2str(x0))];
+        %funcRep = strrep(funcRep,'x','t');
         
         legend('Segment Data',['y=' funcRep],['y=' lineRep],'Location','SouthOutside')
         
-        words = sprintf('Segment %i of %i: Voltage constant at %0.2f V, %s',i,voltageStepsTaken,thisVoltage(i),reportString);
-        title(words)
+        title(reportString)
         xlabel('Time [s]')
         ylabel('Current [mA/cm^2]')
         hold off
@@ -375,19 +396,32 @@ title(myTitle)
 colorbar
 print(f,'-dpng',[dir filesep 'powerMap.png'])
 
-if dontDrawFigures
-    f = figure('Visible','off');
-else
-    f = figure;
+
+header = {'Voltage [V]', 'Best Current Density [mA/cm^2]', 'Worst Current Density [mA/cm^2]'};
+outData = [thisVoltage' apparentCurrent(bestPowI,:)' apparentCurrent(worstPowI,:)'];
+for j =1:length(fitParams(i,:))
+    if dontDrawFigures
+        f = figure('Visible','off');
+    else
+        f = figure;
+    end
+    plot(thisVoltage,fitParams(:,j))
+    h = title(file);
+    %set(h,'interpreter','none')
+    xlabel('Voltage [V]')
+    ylabel(funcVarNames{j})
+    set(gca,'xdir','reverse')
+    grid on
+    print(f,'-dpng',[dir filesep funcVarNames{j} '.png'])
+    header{j+3} = funcVarNames{j};
+    outData(:,j+3) = fitParams(:,j)';
 end
-plot(thisVoltage,tau)
-h = title(file);
-set(h,'interpreter','none')
-xlabel('Voltage [V]')
-ylabel('\tau [s]')
-set(gca,'xdir','reverse')
-grid on
-print(f,'-dpng',[dir filesep 'tau.png'])
+header{j+4} = 'Q [mC/cm^2]';
+outData(:,j+4) = qAnalytical';
+header{j+5} = 'R^2';
+outData(:,j+5) = R2';
+
+
 
 if dontDrawFigures
     f = figure('Visible','off');
@@ -403,26 +437,13 @@ set(h,'interpreter','none')
 grid on
 print(f,'-dpng',[dir filesep 'q.png'])
 
-if dontDrawFigures
-    f = figure('Visible','off');
-else
-    f = figure;
-end
-plot(thisVoltage,m)
-xlabel('Voltage [V]')
-ylabel('Linear Decay [mA/cm^2/s]')
-h = title(file);
-set(h,'interpreter','none')
-set(gca,'xdir','reverse')
-grid on
-print(f,'-dpng',[dir filesep 'decayRate.png'])
+
 
 %write out data file
 outFileName = [dir filesep 'numericalOutputs.csv'];
-header = {'Voltage [V]', 'Best Current Density [mA/cm^2]', 'Worst Current Density [mA/cm^2]', 'Tau [s]', 'Q [mC/cm^2]','Linear Decay Rate [mA/cm^2/s]'};
 headerLine = sprintf('%s,',header{:});
 dlmwrite(outFileName,headerLine,'');
-outData = [thisVoltage' apparentCurrent(bestPowI,:)' apparentCurrent(worstPowI,:)' tau' qAnalytical' m'];
 dlmwrite(outFileName,outData,'-append','delimiter',',');
 
+fprintf('Mean R^2 = %0.5f\n',mean(R2))
 fprintf('Done\n')
