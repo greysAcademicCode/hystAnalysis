@@ -20,6 +20,19 @@ showAnalysisPlots = true;
 %condition (slow)
 generateInterpolatedPowerMap = false;
 
+%function describing assumed decay shape
+%variables named 'm' and 'b' an 'x0' can not be used.
+%'x' must be used as the independant variable
+%note that the entry here will be added to the equation of a line and
+%approritely time shifted
+assumedDecayFunction = 'c/(x+d)';
+%assumedDecayFunction = 'c*exp(-1/tau*x)';
+
+%you must provide guesses for your variables for the fit algorithm
+%normally this doesn't matter too much
+%list the guesses in the order you introduced your variables in assumedDecayFunction
+variableGuesses = [0, 1e-3];
+
 %========STOP EDITING NOW PROBABLY=========
 %read in data and get it ready
 [file, path] = uigetfile('*.*');
@@ -112,13 +125,36 @@ iStart = 1 + segmentsToSkip;
 
 %this is the equation of the line we'll fit the tail to
 line = @(m,b,x0,x) m*(x-x0)+b;
+variableString = '@(m,b,';
 
+decaySym = sym(assumedDecayFunction);
+decaySym = subs(decaySym,'x','x-x0');
+symVars = symvar(decaySym);
+for i = 1:length(symVars)
+    charVar = char(symVars(i));
+    if ~(strcmp(charVar,'x') || strcmp(charVar,'x0'))
+        variableString = [variableString charVar ','];
+    end
+end
+variableString = [variableString 'x0,x) '];
+
+f = str2func([variableString 'm*(x-x0)+b+' char(decaySym)]);
+f = @(m,b,c,d,x0,x)m*(x-x0)+b+c./(d+x-x0);
 %this is the equation of the line plus the transient curve
-f = @(m,b,c,d,x0,x) (m*(x-x0)+b)+(c./((x-x0+d)));
+%f = @(m,b,c,d,x0,x) (m*(x-x0)+b)+(c./((x-x0+d)));
 %f = @(m,b,c,tau,x0,x) (m*(x-x0)+b)+(c*exp(-1/tau*(x-x0)));
 
 %initial guesses for fit variables
-intialGuess = [0 0 0 1e-3];
+intialGuess = [0 0 variableGuesses];
+
+lineStr = func2str(line);
+lineScanned = textscan(func2str(line),'@(%[^)]) %s');
+lineVarNames = strsplit(lineScanned{1}{1},',');
+lineStr=lineScanned{2}{1};
+funcStr = func2str(f);
+funcScanned = textscan(func2str(f),'@(%[^)]) %s');
+funcVarNames = strsplit(funcScanned{1}{1},',');
+funcStr=funcScanned{2}{1};
 
 %setup the fits
 ft = fitoptions('Method','NonlinearLeastSquares','TolFun',1e-19,'TolX',1e-19,'Display','notify','MaxFunEvals',3000,'MaxIter',3000,'Algorithm','levenberg-marquardt');
@@ -168,7 +204,7 @@ for i = iStart:voltageStepsTaken
     %x0
     
     %fit a line to the assumed linear region:
-    lineGuess= [intialGuess(1),intialGuess(2)];
+    lineGuess = [intialGuess(1),intialGuess(2)];
     
     ft.StartPoint = lineGuess;
     [earlyLine,gof,output] = fit(assumedLineart,assumedLinearI,lineFitter,'problem',x0,ft);
@@ -199,22 +235,21 @@ for i = iStart:voltageStepsTaken
     sanityCheckPercentage(i) = abs(trapz(thist,thisI) - curveArea)/trapz(thist,thisI);
     
     R2(i) = gof.rsquare;
-    badFitThreshold = 0.95;
+    badFitThreshold = 0.99;
     if R2(i) < badFitThreshold
-        reportString = 'bad fit.';
+        reportString = 'bad fit';
         badFit = true;
         fitParams(i,:) = nan(1,size(fitParams,2));
         qAnalytical(i) = nan;
     else %the fit was "good"
-        reportString = 'good fit.';
+        reportString = 'good fit';
         badFit = false;
     end
-    fprintf('Segment %i of %i: %s\n',i,voltageStepsTaken,reportString)
+    fprintf('Segment %i of %i: R^2=%0.5f, %s\n',i,voltageStepsTaken,R2(i),reportString)
     
     if showAnalysisPlots
         figure
         hold on
-        %plot(thist,thisI,'.',thist,f(f1,thist),'r',thist,thisISmooth,'g')
         plot(thist,thisI,'.',thist,fittedFunction(thist),'r',thist,fittedLine(thist),'g')
         myxLim = xlim;
         myyLim = ylim;
@@ -229,21 +264,25 @@ for i = iStart:voltageStepsTaken
             h1 = area(thist,fittedFunction(thist));
             set(h1,'FaceColor','white','LineStyle','none')
         end
-        
-        lineStr = func2str(line);
-        lineScanned = textscan(func2str(line),'@(%[^)]) %s');
-        funcStr = func2str(f);
-        funcScanned = textscan(func2str(f),'@(%[^)]) %s');
-        
-        lineWords = sprintf('y=%0.3f*(x-%0.3f)%+0.3f',m(i),x0,b);
-        
-        fitWords =  sprintf('y=%0.3f*(x-%0.3f)%+0.3f%+0.3f*exp(-1/%0.3f*(x-%0.3f))',m(i),x0,b,scale(i),tau(i),x0);
-        legend('Current Data',fitWords,lineWords,'Location','SouthOutside')
-        
+        plot(thist,thisI,'.',thist,fittedFunction(thist),'r',thist,fittedLine(thist),'g')
         xlim(myxLim)
         ylim(myyLim)
-        plot(thist,thisI,'.',thist,fittedFunction(thist),'r',thist,fittedLine(thist),'g')
-        words = sprintf('Voltage constant at %0.2f V',thisVoltage(i));
+        
+        lineRep = strrep(lineStr,lineVarNames{1},num2str(fitParams(i,1)));
+        lineRep = strrep(lineRep,lineVarNames{2},num2str(fitParams(i,2)));
+        lineRep = strrep(lineRep,'x0',num2str(x0));
+        lineRep = strrep(lineRep,'x','t');
+        
+        funcRep = funcStr;
+        for j =1:length(fitParams(i,:))
+            funcRep = strrep(funcRep,funcVarNames{j},num2str(fitParams(i,j)));
+        end
+        funcRep = strrep(funcRep,'x0',num2str(x0));
+        funcRep = strrep(funcRep,'x','t');
+        
+        legend('Segment Data',['y=' funcRep],['y=' lineRep],'Location','SouthOutside')
+        
+        words = sprintf('Segment %i of %i: Voltage constant at %0.2f V, %s',i,voltageStepsTaken,thisVoltage(i),reportString);
         title(words)
         xlabel('Time [s]')
         ylabel('Current [mA/cm^2]')
