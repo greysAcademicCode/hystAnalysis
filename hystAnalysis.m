@@ -33,7 +33,7 @@ assumedDecayFunction = 'c*exp(-1/tau*x)+d*exp(-1/tau2*x)';
 
 %you must provide guesses for your variables for the fit algorithm
 %normally this doesn't matter too much
-%list the guesses ordered alphabetically by the variables they are for
+%list the guesses ordered alphabetically by variable name used in
 %assumedDecayFunction above
 %variableGuesses = [0, 1e-3];
 %variableGuesses = [0, 1];
