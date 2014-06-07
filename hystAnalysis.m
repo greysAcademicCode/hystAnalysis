@@ -1,4 +1,4 @@
-%analysis for eva's perovskite hysteresis
+%analysis for perovskite hysteresis
 
 clear all
 %==============EDIT HERE===================
