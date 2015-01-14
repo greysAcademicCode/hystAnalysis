@@ -1,7 +1,7 @@
 hystAnalysis
 =================
 
-some MATLAB code to analyze hysteresis
+some MATLAB code to analyze hysteresis in (perovskite) solar cell IV curves
 
 ### Files here
 - __hystAnalysis.m__
