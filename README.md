@@ -11,5 +11,5 @@ some MATLAB code to analyze hysteresis in (perovskite) solar cell IV curves
 
 ### If you find this code useful...
 Please cite our work:  
-[DOI: 10.1039/C4EE02465F](http://pubs.rsc.org/en/Content/ArticleLanding/2014/EE/C4EE02465F)
-and shoot me an email.
+[DOI: 10.1039/C4EE02465F](http://pubs.rsc.org/en/Content/ArticleLanding/2014/EE/C4EE02465F)  
+and shoot me an email. grey [AT] christoforo [DOT] net
