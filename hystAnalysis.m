@@ -1,4 +1,5 @@
 %analysis for perovskite hysteresis
+% written by Grey Christoforo <first name [at] last name [dot] net>
 
 clear all
 %==============EDIT HERE===================
