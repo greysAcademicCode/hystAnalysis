@@ -7,7 +7,7 @@ some MATLAB code to analyze hysteresis in (perovskite) solar cell IV curves
 ---
 Please cite our work:  
 [DOI: 10.3390/photonics2041101](http://www.mdpi.com/2304-6732/2/4/1101/htm) 
-and shoot me an email. grey [AT] christoforo [DOT] net
+and shoot me an email. grey [AT] christoforo [DOT] net  
 I'd be super happy to accept pull requests or ideas you have for improving this!
 
 ### Files here
